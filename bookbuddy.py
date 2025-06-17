@@ -1,42 +1,73 @@
 # -*- coding: utf-8 -*-
 
 import streamlit as st
+from send_email import send_email
+from quiz_generator import generate_quiz_batch
+import re
+import base64
 
-from send_email import send_email  # 네가 만든 이메일 함수
 
 st.set_page_config(page_title="BookBuddy", page_icon="📚", layout="centered")
+
 
 # 세션 상태 초기화
 if "page" not in st.session_state:
     st.session_state.page = "welcome"
 
-# 함수로 각 페이지 정의
-def show_welcome():
-    st.title("📚 BookBuddy에 오신 걸 환영합니다!")
-    st.markdown("책을 읽고, AI가 만든 퀴즈를 풀며 캐릭터를 키워보세요!")
-    
-    # 이미지 넣고 싶으면 나중에 교체
-    # st.image("your_image.png", width=200)
+# 함수: 시작 페이지
 
+def set_background(image_path):
+    with open(image_path, "rb") as image_file:
+        encoded_string = base64.b64encode(image_file.read()).decode()
+    st.markdown(
+        f"""
+        <style>
+        .stApp {{
+            background-image: url("data:image/png;base64,{encoded_string}");
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+set_background("images/background/bb.png")
+
+def show_welcome():
+    st.title("BookBuddy 캐릭터 꾸미기!")
+    st.markdown("""
+한 권의 책을 읽고, 퀴즈를 풀어 이해도를 확인해보세요!  
+BookBuddy 캐릭터 꾸미기는 독서 후 AI 퀴즈를 풀고,획득한 코인으로 캐릭터를 꾸미는 독서 보상 게임이에요.  
+마지막에는 책을 읽고 느낀 감정을 선택해 감정에 따라 표정이 바뀌는 나만의 캐릭터를 완성할 수 있어요!
+
+---
+
+###  어떻게 플레이하나요?
+
+1. 책을 선택하고, AI가 만든 퀴즈를 풀어요.  
+2. 정답 수에 따라 코인을 받아요.  
+3. 코인으로 상점에서 아이템을 구매해 캐릭터를 꾸며요.  
+4. 책을 읽고 느낀 감정을 선택해 표정을 완성해요.  
+5. 캐릭터는 책 제목과 함께 컬렉션에 저장돼요.
+""")
     if st.button("👉 시작하기"):
         st.session_state.page = "select_book"
 
+# 함수: 책 선택 페이지
+
 def show_select_book():
     st.title("📖 책을 선택하세요!")
-
-    # 카테고리 필터 및 검색창
     st.subheader("🔍 필터")
     category = st.selectbox("카테고리", ["전체", "동화", "추리", "고전"])
     search = st.text_input("제목 검색")
 
-    # 예시용 책 목록
     books = {
         "오즈의 마법사": "동화",
         "이상한 나라의 앨리스": "동화",
         "셜록 홈즈": "추리"
     }
 
-    # 필터링
     filtered_books = [
         title for title, cat in books.items()
         if (category == "전체" or cat == category) and (search.lower() in title.lower())
@@ -45,18 +76,20 @@ def show_select_book():
     for book in filtered_books:
         st.markdown(f"### 📘 {book}")
         if st.button(f"📖 '{book}' 퀴즈 시작하기", key=book):
-            st.session_state.selected_book = book  # 선택된 책 저장
-            st.session_state.page = "quiz"         # 페이지 상태를 quiz로 바꿈
-            st.rerun()                # 페이지 다시 실행해서 퀴즈 화면으로 이동  # 추후 연결
+            st.session_state.selected_book = book
+            # 항상 새로운 퀴즈 생성
+            st.session_state.question_blocks = []
+            st.session_state.answers = {}
+            st.session_state.quiz_submitted = False
+            st.session_state.page = "quiz"
+            st.rerun()
 
     st.markdown("---")
-
     with st.expander("📩 찾는 책이 없나요? 퀴즈 추가 요청하기"):
         name = st.text_input("이름")
         email = st.text_input("이메일 주소")
         requested_book = st.text_input("추가 요청하고 싶은 책 제목")
         message = st.text_area("전하고 싶은 말")
-
         if st.button("📨 요청 보내기"):
             if name and email and requested_book:
                 success = send_email(name, email, requested_book, message)
@@ -67,19 +100,16 @@ def show_select_book():
             else:
                 st.warning("모든 필수 항목을 입력해 주세요.")
 
-from quiz_generator import generate_quiz_batch
-import re
+# 함수: 퀴즈 페이지
 
 def show_quiz():
-    st.title(f"🧠 '{st.session_state.selected_book}' 퀴즈")
+    st.title(f" '{st.session_state.selected_book}' 퀴즈")
 
-    # 퀴즈 제출 여부 확인
-    if "quiz_submitted" not in st.session_state:
+    if not st.session_state.get("question_blocks"):
         with st.spinner("GPT가 문제를 생성 중입니다..."):
             raw_quizzes = generate_quiz_batch(st.session_state.selected_book)
             full_text = "\n".join(raw_quizzes)
 
-        # 줄 단위로 자르기
         lines = [line.strip() for line in full_text.strip().split("\n") if line.strip()]
         question_blocks = []
         current_block = []
@@ -88,64 +118,14 @@ def show_quiz():
             if re.match(r"^[①②③④]", line):
                 current_block.append(line)
             else:
-                if current_block:
-                    # 직전 블록이 완성된 문제(질문+보기 4개)면 저장
-                    if len(current_block) == 5:
-                        question_blocks.append(current_block)
-                    current_block = []
-                current_block = [line]
-
-        # 마지막 블록 확인
-        if current_block and len(current_block) == 5:
-            question_blocks.append(current_block)
-
-        # 딱 10문제만 사용
-        question_blocks = question_blocks[:10]
-
-        # 세션에 저장
-        st.session_state.question_blocks = question_blocks
-        st.session_state.answers = {}
-        st.session_state.quiz_submitted = False
-
-    # 문제 출력
-    from quiz_generator import generate_quiz_batch
-import re
-
-def show_quiz():
-    import re
-    from quiz_generator import generate_quiz_batch
-
-    st.title(f"🧠 '{st.session_state.selected_book}' 퀴즈")
-
-    # 퀴즈 제출 여부 확인
-    if "quiz_submitted" not in st.session_state:
-        with st.spinner("GPT가 문제를 생성 중입니다..."):
-            raw_quizzes = generate_quiz_batch(st.session_state.selected_book)
-            full_text = "\n".join(raw_quizzes)
-
-        # 줄 단위로 나누기
-        lines = [line.strip() for line in full_text.strip().split("\n") if line.strip()]
-        question_blocks = []
-        current_block = []
-
-        for line in lines:
-            if re.match(r"^[①②③④]", line):
-                current_block.append(line)
-            else:
-                if current_block:
-                    if len(current_block) == 5:
-                        question_blocks.append(current_block)
-                    current_block = []
+                if current_block and len(current_block) == 5:
+                    question_blocks.append(current_block)
                 current_block = [line]
 
         if current_block and len(current_block) == 5:
             question_blocks.append(current_block)
 
-        # 딱 10문제만 사용
-        question_blocks = question_blocks[:10]
-
-        # 세션 저장
-        st.session_state.question_blocks = question_blocks
+        st.session_state.question_blocks = question_blocks[:10]
         st.session_state.answers = {}
         st.session_state.quiz_submitted = False
 
@@ -153,12 +133,10 @@ def show_quiz():
     for i, block in enumerate(st.session_state.question_blocks):
         raw_question = block[0]
         question = re.sub(r"^\d+\.\s*", "", raw_question)
-
-        raw_choices = block[1:]  # 원본 보기 (정답 포함됨)
-        display_choices = [c.replace("(정답)", "").strip() for c in raw_choices]  # 사용자에게 보여줄 보기
+        raw_choices = block[1:]
+        display_choices = [c.replace("(정답)", "").strip() for c in raw_choices]
 
         st.markdown(f"**{i + 1}. {question}**")
-
         selected_display = st.radio(
             "정답 선택:",
             options=display_choices,
@@ -167,19 +145,16 @@ def show_quiz():
             horizontal=True
         )
 
-        # 사용자가 고른 보기의 인덱스를 기반으로 원본 정답 포함 보기 저장
         selected_index = display_choices.index(selected_display) if selected_display else None
         if selected_index is not None:
             st.session_state.answers[i] = raw_choices[selected_index]
 
         st.markdown("---")
 
-    # 채점 버튼
     if st.button("✅ 채점하기"):
         st.session_state.page = "result"
         st.session_state.quiz_submitted = True
         st.rerun()
-
 
 def show_result():
     st.title("📝 채점 결과")
@@ -189,7 +164,6 @@ def show_result():
 
     for i, block in enumerate(st.session_state.question_blocks):
         raw_question = block[0]
-        # GPT가 붙인 숫자 제거
         question = re.sub(r"^\d+\.\s*", "", raw_question)
         choices = block[1:]
 
@@ -219,14 +193,18 @@ def show_result():
     st.success(f"정답 수: {correct} / {total}")
     st.markdown(f"💰 획득 코인: **{coins} 코인**")
 
+    # 코인 지급 (중복 방지)
     if "coin" not in st.session_state:
         st.session_state.coin = 0
-    st.session_state.coin += coins
+    if not st.session_state.get("coin_given", False):
+        st.session_state.coin += coins
+        st.session_state.coin_given = True
 
     # 다음 단계로 이동
     if st.button("🏪 상점으로 이동하기"):
         st.session_state.page = "shop"
         st.rerun()
+
 
 import os
 import streamlit as st
@@ -251,18 +229,18 @@ ITEM_PRICES = {
     **{f"skin_{i}": 200 for i in range(1, 12)},
     # 헤어스타일 h1~h25
     **{f"h_{i}": price for i, price in zip(range(1, 26),
-        [500, 600, 400, 500, 600, 400, 500, 600, 400, 500,
-         600, 400, 500, 600, 400, 500, 600, 400, 500, 600,
-         400, 500, 600, 400, 500])},
+        [300, 300, 300, 300, 300, 100, 500, 400, 400, 400,
+         400, 400, 400, 400, 400, 500, 500, 800, 800, 400,
+         400, 600, 600, 600, 500])},
     # 상의 c1~c14
     **{f"c_{i}": price for i, price in zip(range(1, 15),
-        [500, 400, 500, 400, 500, 400, 500, 400, 500, 400, 500, 400, 500, 400])},
+        [400, 500, 500, 400, 400, 300, 200, 500, 400, 300, 300, 300, 400, 400])},
     # 하의 t1~t11
     **{f"t_{i}": price for i, price in zip(range(1, 12),
         [450, 550, 350, 450, 550, 350, 450, 550, 350, 450, 550])},
     # 드레스 d1~d9
     **{f"d_{i}": price for i, price in zip(range(1, 11),
-        [700, 600, 700, 600, 700, 600, 700, 600, 700,700,700])},
+        [600, 700, 800, 800, 700, 700, 700, 700, 700,200,200])},
     # 배경 b1~b5
     **{f"b_{i}": 300 for i in range(1, 6)}
 }
@@ -371,36 +349,36 @@ def show_shop():
 import math
 import streamlit as st
 
-# 감정 키워드 정의 및 점수 벡터
+# 감정 키워드 정의 및 점수 벡터 (더 다양하게 분산시킴)
 EMOTION_KEYWORDS = {
-    "기쁨": [5, 0, 0],
-    "즐거움": [5, 0, 1],
-    "신기함": [4, 0, 2],
-    "새로움": [4, 0, 1],
+    "기쁨": [6, 0, 0],
     "행복": [5, 0, 0],
-    "평온": [4, 0, -1],
+    "즐거움": [4, 0, 2],
+    "신기함": [3, 0, 4],
+    "새로움": [2, 0, 3],
     "자신감": [4, 0, 0],
-    "놀람": [0, 0, 5],
-    "충격": [-1, 0, 5],
-    "의아": [-1, 0, 4],
+    "평온": [3, 0, -4],
+    "놀람": [0, 0, 6],
+    "충격": [-1, 0, 6],
+    "의아": [-1, 0, 5],
     "혼란": [-2, 0, 4],
-    "슬픔": [-5, 0, 0],
     "조금 속상함": [-3, 0, 0],
-    "불만족스러움": [-2, 0, 1],
-    "화남": [-4, 1, 0],
-    "좌절": [-4, 1, -1],
-    "두려움": [-3, 1, 2],
+    "불만족스러움": [-2, 1, 1],
+    "슬픔": [-6, 0, 0],
+    "화남": [-5, 5, 0],
+    "좌절": [-4, 3, 0],
+    "두려움": [-3, 2, 3],
 }
 
-# 표정 벡터 정의 (총 7개)
+# 표정 벡터 정의 (더 확연히 분리)
 EXPRESSION_VECTORS = {
-    "아주기쁨": [5, 0, 0],
-    "평온": [4, 0, -1],
-    "신남": [4, 0, 2],
+    "아주기쁨": [6, 0, 0],
+    "신남": [0, 0, 6],
+    "평온": [3, 0, -5],
     "조금 속상함": [-3, 0, 0],
-    "슬픔": [-5, 0, 0],
-    "화남": [-4, 1, 0],
-    "놀람": [0, 0, 5],
+    "슬픔": [-6, 0, 0],
+    "화남": [-5, 5, 0],
+    "놀람": [0, 0, 8],
 }
 
 # 유클리드 거리 계산 함수
@@ -422,14 +400,14 @@ def get_best_expression(selected_keywords):
 # 감정 포션 만들기 페이지
 def show_emotion_potion():
     st.title("🧪 감정포션 만들기")
-    st.markdown("이 책을 읽고 어떤 감정을 느꼈나요? 아래 감정 중 3~5개를 골라 포션을 만들어 보세요!")
+    st.markdown("책을 읽고 느낀 감정을 골라 포션을 만들고, 캐릭터의 표정을 완성해보세요!")
 
     all_emotions = [
         "기쁨", "행복", "신남", "놀람", "평온",
         "슬픔", "화남", "조금 속상함", "두려움", "좌절"
     ]
 
-    # 감정 키워드 선택 UI (체크박스 나열)
+    # 감정 키워드 선택 UI
     selected = []
     cols = st.columns(5)
     for idx, emotion in enumerate(all_emotions):
@@ -437,7 +415,7 @@ def show_emotion_potion():
             if st.checkbox(emotion, key=f"emotion_{emotion}"):
                 selected.append(emotion)
 
-    # 감정 개수에 따라 버튼 제어
+    # 감정 개수에 따라 제어
     if len(selected) < 3:
         st.warning("⚠️ 최소 3개 이상의 감정을 선택해주세요.")
     elif len(selected) > 5:
@@ -447,12 +425,13 @@ def show_emotion_potion():
             expression = get_best_expression(selected)
             if expression:
                 st.session_state.selected_emotions = selected
-                st.session_state.expression_label = expression  # 합성 단계에서 사용
-                st.success("🧪 감정 포션이 완성되었어요! 다음 단계에서 캐릭터에게 적용할 수 있어요.")
+                st.session_state.expression_label = expression
+                st.success(f"🎭 감정 포션이 완성되어 '{expression}' 표정이 적용됩니다!")
                 st.session_state.page = "magic"
                 st.rerun()
             else:
                 st.error("😢 표정을 결정할 수 없어요. 감정을 다시 선택해 주세요.")
+
 
 
 from PIL import Image
@@ -577,10 +556,13 @@ def show_collection():
     # 책 제목별로 분류
     grouped = defaultdict(list)
     for file in files:
-        if "_" in file:
-            name, book = file.rsplit("_", 1)
-            book = book.replace(".png", "")
-            grouped[book].append((name, os.path.join(collection_dir, file)))
+        try:
+            filename = file.replace(".png", "")
+            # 예: 박선유_오즈의마법사 → ['박선유', '오즈의마법사']
+            user, book = filename.split("_", 1)
+            grouped[book].append((user, os.path.join(collection_dir, file)))
+        except ValueError:
+            continue  # 혹시나 포맷 안 맞는 파일은 무시
 
     # 출력
     for book_title in grouped:
@@ -590,37 +572,19 @@ def show_collection():
             with cols[idx % 3]:
                 st.image(img_path, caption=f"{user}", use_container_width=True)
 
-    st.markdown("---")
     if st.button("📖 다른 책 퀴즈 풀러가기"):
-        st.session_state.page = "select_book"
-        st.rerun()
+    # 모든 세션 상태 초기화
+      for key in list(st.session_state.keys()):
+         # 1. 변경사항 스테이지에 올리기
+         del st.session_state[key]
+      st.rerun()  # 완전한 새로고침
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+# 나머지 함수 show_result, show_shop, show_emotion_potion 등은 그대로 유지
 
 # 라우팅
+
 if st.session_state.page == "welcome":
     show_welcome()
 elif st.session_state.page == "select_book":
@@ -635,12 +599,5 @@ elif st.session_state.page == "emotion_potion":
     show_emotion_potion()
 elif st.session_state.page == "magic":
     show_magic_page()
-
 elif st.session_state.page == "collection":
     show_collection()
-
-
-
-
-
-

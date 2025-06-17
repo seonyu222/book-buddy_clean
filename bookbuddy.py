@@ -509,57 +509,92 @@ def show_magic_page():
     else:
         st.error("⚠️ 캐릭터 이미지를 생성할 수 없어요.")
 
-    # 👉 컬렉션에 저장하고 다음 단계로
+
+
+import os
+from PIL import Image
+import streamlit as st
+
+def show_magic_page():
+    st.title("✨ 내 캐릭터 완성!")
+
+    purchased_items = st.session_state.get("purchased_items", {})
+    expression_label = st.session_state.get("expression_label", "default")
+    book_title = st.session_state.get("selected_book", "unknown_book")
+
+    # 🧍 사용자 이름 입력
+    user_name = st.text_input("👤 사용자 이름을 입력해주세요", key="user_name")
+
+    image_path = generate_character_image(purchased_items, expression_label)
+
+    if image_path and os.path.exists(image_path):
+        st.image(image_path, caption="최종 캐릭터", use_container_width=True)
+    else:
+        st.error("⚠️ 캐릭터 이미지를 생성할 수 없어요.")
+
     if st.button("🎀 컬렉션에 저장하고 다음으로!"):
+        if not user_name:
+            st.warning("⚠️ 이름을 입력해주세요!")
+            return
+
         collection_dir = "images/collection"
         os.makedirs(collection_dir, exist_ok=True)
 
-        book_title = st.session_state.get("selected_book", "unknown_book")
-        save_path = os.path.join(collection_dir, f"{book_title}.png")
+        # 📸 저장 경로
+        save_path = os.path.join(collection_dir, f"{user_name}_{book_title}.png")
 
         if os.path.exists(image_path):
             img = Image.open(image_path)
             img.save(save_path)
 
+        st.success("✅ 저장이 완료되었어요!")
         st.session_state.page = "collection"
         st.rerun()
+
+
 
     
 
 
     # 컬렉션 저장 버튼 등 추가 가능
 
-import os
-from PIL import Image
+from collections import defaultdict
 
 def show_collection():
     st.title("📚 나의 BookBuddy 컬렉션")
-    st.markdown("지금까지 읽은 책과 만들어낸 캐릭터들을 모아봤어요!")
+    st.markdown("지금까지 저장된 캐릭터들을 책 제목별로 모아봤어요!")
 
     collection_dir = "images/collection"
     if not os.path.exists(collection_dir):
-        st.warning("아직 저장된 캐릭터가 없어요. 퀴즈를 풀고 캐릭터를 완성해보세요!")
+        st.warning("아직 저장된 캐릭터가 없어요.")
         return
 
     files = sorted([f for f in os.listdir(collection_dir) if f.endswith(".png")])
-
     if not files:
-        st.info("📁 아직 컬렉션이 비어있어요. 책을 읽고 캐릭터를 만들어 저장해보세요!")
+        st.info("📁 컬렉션이 비어있어요.")
         return
 
-    # 책별 캐릭터 이미지 출력 (3열씩)
-    cols = st.columns(3)
-    for idx, file in enumerate(files):
-        book_title = os.path.splitext(file)[0]
-        image_path = os.path.join(collection_dir, file)
+    # 책 제목별로 분류
+    grouped = defaultdict(list)
+    for file in files:
+        if "_" in file:
+            name, book = file.rsplit("_", 1)
+            book = book.replace(".png", "")
+            grouped[book].append((name, os.path.join(collection_dir, file)))
 
-        with cols[idx % 3]:
-            st.image(image_path, caption=f"📘 {book_title}", use_container_width=True)
+    # 출력
+    for book_title in grouped:
+        st.subheader(f"📘 {book_title}")
+        cols = st.columns(3)
+        for idx, (user, img_path) in enumerate(grouped[book_title]):
+            with cols[idx % 3]:
+                st.image(img_path, caption=f"{user}", use_container_width=True)
 
     st.markdown("---")
     if st.button("📖 다른 책 퀴즈 풀러가기"):
         st.session_state.page = "select_book"
         st.rerun()
+
 
 
 

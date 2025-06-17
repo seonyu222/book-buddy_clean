@@ -73,7 +73,6 @@ def show_select_book():
     books = {
         "오즈의 마법사": "동화",
         "이상한 나라의 앨리스": "동화",
-        "셜록 홈즈": "추리"
     }
 
     filtered_books = [
